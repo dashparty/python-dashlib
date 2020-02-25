@@ -387,9 +387,9 @@ class CTxWitness(ImmutableSerializable):
 
 class CTransaction(ImmutableSerializable):
     """A transaction"""
-    __slots__ = ['nVersion', 'vin', 'vout', 'nLockTime', 'wit']
+    __slots__ = ['nVersion', 'vin', 'vout', 'nLockTime', 'nType', 'extraPayload', 'wit']
 
-    def __init__(self, vin=(), vout=(), nLockTime=0, nVersion=1, witness=CTxWitness()):
+    def __init__(self, vin=(), vout=(), nLockTime=0, nVersion=1, nType=0, extraPayload=None, witness=CTxWitness()):
         """Create a new transaction
 
         vin and vout are iterables of transaction inputs and outputs
@@ -402,6 +402,8 @@ class CTransaction(ImmutableSerializable):
         object.__setattr__(self, 'nVersion', nVersion)
         object.__setattr__(self, 'vin', tuple(CTxIn.from_txin(txin) for txin in vin))
         object.__setattr__(self, 'vout', tuple(CTxOut.from_txout(txout) for txout in vout))
+        object.__setattr__(self, 'nType', nType)
+        object.__setattr__(self, 'extraPayload', extraPayload)
         object.__setattr__(self, 'wit', CTxWitness.from_txwitness(witness))
 
     @classmethod
@@ -418,11 +420,12 @@ class CTransaction(ImmutableSerializable):
         but not here.
         """
         # FIXME can't assume f is seekable
-        nVersion = struct.unpack(b"<i", ser_read(f,4))[0]
-        pos = f.tell()
-        markerbyte = struct.unpack(b'B', ser_read(f, 1))[0]
-        flagbyte = struct.unpack(b'B', ser_read(f, 1))[0]
-        if markerbyte == 0 and flagbyte == 1:
+        nVersion = struct.unpack(b"<h", ser_read(f,2))[0]
+        nType = struct.unpack(b"<h", ser_read(f,2))[0]
+        #pos = f.tell()
+        #markerbyte = struct.unpack(b'B', ser_read(f, 1))[0]
+        #flagbyte = struct.unpack(b'B', ser_read(f, 1))[0]
+        if False: #markerbyte == 0 and flagbyte == 1:
             vin = VectorSerializer.stream_deserialize(CTxIn, f)
             vout = VectorSerializer.stream_deserialize(CTxOut, f)
             wit = CTxWitness(tuple(0 for dummy in range(len(vin))))
@@ -430,11 +433,14 @@ class CTransaction(ImmutableSerializable):
             nLockTime = struct.unpack(b"<I", ser_read(f,4))[0]
             return cls(vin, vout, nLockTime, nVersion, wit)
         else:
-            f.seek(pos) # put marker byte back, since we don't have peek
+            #f.seek(pos) # put marker byte back, since we don't have peek
             vin = VectorSerializer.stream_deserialize(CTxIn, f)
             vout = VectorSerializer.stream_deserialize(CTxOut, f)
             nLockTime = struct.unpack(b"<I", ser_read(f,4))[0]
-            return cls(vin, vout, nLockTime, nVersion)
+            extraPayload = None
+            if nVersion >= 3 and nType > 0:
+                extraPayload = BytesSerializer.stream_deserialize(f)
+            return cls(vin, vout, nLockTime, nVersion, nType, extraPayload)
 
 
     def stream_serialize(self, f, include_witness=True):
@@ -687,7 +693,6 @@ class CBlock(CBlockHeader):
     @classmethod
     def stream_deserialize(cls, f):
         self = super(CBlock, cls).stream_deserialize(f)
-
         vtx = VectorSerializer.stream_deserialize(CTransaction, f)
         vMerkleTree = tuple(CBlock.build_merkle_tree_from_txs(vtx))
         object.__setattr__(self, 'vMerkleTree', vMerkleTree)
